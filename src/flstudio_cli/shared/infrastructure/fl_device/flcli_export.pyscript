@@ -1,0 +1,58 @@
+"""flcli — Piano Roll export script.
+
+Counterpart to ``flcli_import.pyscript``. Install by copying (keeping
+the ``.pyscript`` extension) to:
+
+    Documents/Image-Line/FL Studio/Settings/Piano roll scripts/flcli_export.pyscript
+
+Then in FL Studio: open the Piano Roll on the channel you want to read
+and run ``Tools -> Scripts -> flcli_export``. The script writes every
+note in the current score to ``piano_roll_export.json`` *next to this
+script*. The CLI commands ``piano-roll-show`` and ``piano-roll-edit``
+read it from there.
+
+The data file lives next to this script because FL Studio's embedded
+Python sandbox cannot ``open()`` absolute paths (``_io.FileIO`` returns
+NULL); relative filenames resolved against the script directory work.
+"""
+import json
+import os
+
+import flpianoroll as flp
+
+EXPORT_FILENAME = "piano_roll_export.json"
+
+
+def _run():
+    ppq = flp.score.PPQ
+    notes = []
+    for index in range(flp.score.noteCount):
+        note = flp.score.getNote(index)
+        velocity_norm = float(note.velocity)
+        if velocity_norm < 0.0:
+            velocity_norm = 0.0
+        if velocity_norm > 1.0:
+            velocity_norm = 1.0
+        notes.append({
+            "index": index,
+            "pitch": int(note.number) & 0x7F,
+            "velocity": int(round(velocity_norm * 127)),
+            "position": float(note.time) / ppq,
+            "length": float(note.length) / ppq,
+        })
+
+    # Write directly (skip atomic tmp+rename because os.replace can hit
+    # the same sandbox SystemError as os.remove). Re-running the export
+    # is the user's recovery path if a write is interrupted.
+    fh = open(EXPORT_FILENAME, "w")
+    try:
+        fh.write(json.dumps({"version": 1, "ppq": ppq, "notes": notes}))
+    finally:
+        fh.close()
+
+    flp.Utils.ShowMessage(
+        "flcli: exported %d notes (next to this script)" % len(notes)
+    )
+
+
+_run()

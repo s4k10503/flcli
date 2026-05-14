@@ -1,0 +1,17 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/gauge-sh/tach-pre-commit
+    rev: v0.29.0
+    hooks:
+      - id: tach
+      - id: tach-external
+  - repo: https://github.com/RobertCraiwordi/mirrors-prettier
+    rev: v3.4.2
+    hooks:
+      - id: prettier
+        types_or: [yaml, json]

@@ -1,0 +1,263 @@
+# Architectural enforcement for flstudio_cli.
+#
+# Tach (https://docs.gauge.sh/) walks the import graph and rejects PRs that
+# introduce dependencies not declared here, so the layered + feature-axis
+# rules described in README.md can no longer drift silently.
+#
+# Modules are declared at depth 2 (`flstudio_cli.<feature>.<layer>`) so the
+# config catches:
+#   * cross-feature imports that bypass `shared/`
+#   * presentation reaching into infrastructure (skipping composition)
+#   * accidental circular dependencies between layers
+#
+# Known carve-outs are tagged `TODO(#NNN)` and wired to open issues; deleting
+# the listed violation lets `tach check --exact` flag the now-unused entry.
+
+source_roots = ["src"]
+
+exclude = [
+    "**/__pycache__",
+    "**/tests",
+    "**/conftest.py",
+    "scripts",
+]
+# Note: `device_flcli.py` (FL Studio sandbox script that imports `channels`,
+# `device`, `general`, ... from the embedded interpreter) is left in the walk.
+# tach's walker excludes by directory only, so a per-file entry was a no-op
+# for `tach check` and broke `tach show --web`. tach already tolerates the
+# unresolvable sandbox imports because they don't belong to any declared
+# module. ruff / pyright continue to exclude the file via their own configs.
+
+forbid_circular_dependencies = true
+exact = true
+ignore_type_checking_imports = true
+root_module = "ignore"
+
+[external]
+# Optional extras: pyflp (`flp` extra) and pynput (`auto-trigger` extra) are
+# imported lazily inside try/except blocks so the base install stays slim.
+# python-rtmidi is pulled in transitively as the rtmidi backend for `mido`,
+# not imported by name in our code.
+#
+# `channels` / `device` / `general` / `midi` / `mixer` / `patterns` /
+# `plugins` / `transport` / `ui` are FL Studio's embedded-interpreter
+# modules consumed by `device_flcli.py` (which runs inside FL Studio's
+# Python sandbox, never on the host). They will never appear in
+# `pyproject.toml` because pip can't install them.
+exclude = [
+    "python_rtmidi",
+    "pyflp",
+    "pynput",
+    "channels",
+    "device",
+    "general",
+    "midi",
+    "mixer",
+    "patterns",
+    "plugins",
+    "transport",
+    "ui",
+]
+
+# ---------------------------------------------------------------------------
+# shared/ — cross-cutting modules
+# ---------------------------------------------------------------------------
+# Utility = true: every feature may import without listing the dep.
+# `shared.infrastructure` is intentionally NOT utility so that any feature
+# presentation pulling it in has to declare the dep (and gets reviewed).
+#
+# `shared.utility` hosts layer-free generics (the ``Ok`` / ``Err`` Outcome
+# pair). It is the analogue of Rust's ``std::result`` — domain,
+# application, infrastructure, and presentation may all import freely.
+
+[[modules]]
+path = "flstudio_cli.shared.utility"
+utility = true
+depends_on = []
+
+[[modules]]
+path = "flstudio_cli.shared.domain"
+utility = true
+depends_on = []
+
+[[modules]]
+path = "flstudio_cli.shared.application"
+utility = true
+depends_on = []
+
+[[modules]]
+path = "flstudio_cli.shared.infrastructure"
+depends_on = []
+
+[[modules]]
+path = "flstudio_cli.shared.composition"
+utility = true
+depends_on = [
+    "flstudio_cli.shared.infrastructure",
+    # Composition is the single DI seam — it is allowed (and expected) to
+    # reach into per-feature infrastructure / application to wire production
+    # adapters into the dispatcher.
+    "flstudio_cli.config.infrastructure",
+    "flstudio_cli.piano_roll.infrastructure",
+    "flstudio_cli.state.application",
+]
+
+[[modules]]
+path = "flstudio_cli.shared.presentation"
+utility = true
+depends_on = []
+
+# ---------------------------------------------------------------------------
+# Feature: batch
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "flstudio_cli.batch.application"
+depends_on = []
+
+[[modules]]
+path = "flstudio_cli.batch.presentation"
+depends_on = [
+    "flstudio_cli.batch.application",
+]
+
+# ---------------------------------------------------------------------------
+# Feature: completion
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "flstudio_cli.completion.presentation"
+depends_on = []
+
+# ---------------------------------------------------------------------------
+# Feature: config
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "flstudio_cli.config.infrastructure"
+depends_on = []
+
+[[modules]]
+path = "flstudio_cli.config.presentation"
+depends_on = []
+
+# ---------------------------------------------------------------------------
+# Feature: flp_cli
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "flstudio_cli.flp_cli.presentation"
+depends_on = []
+
+# ---------------------------------------------------------------------------
+# Feature: mixer
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "flstudio_cli.mixer.application"
+depends_on = []
+
+[[modules]]
+path = "flstudio_cli.mixer.presentation"
+depends_on = []
+
+# ---------------------------------------------------------------------------
+# Feature: piano_roll
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "flstudio_cli.piano_roll.domain"
+depends_on = []
+
+[[modules]]
+path = "flstudio_cli.piano_roll.application"
+depends_on = []
+
+[[modules]]
+path = "flstudio_cli.piano_roll.infrastructure"
+depends_on = [
+    # piano_roll_io.py uses the shared atomic_write_text helper; this is a
+    # legitimate infra-to-infra dep (atomic write is a generic OS utility,
+    # not a feature concern).
+    "flstudio_cli.shared.infrastructure",
+]
+
+[[modules]]
+path = "flstudio_cli.piano_roll.presentation"
+depends_on = [
+    "flstudio_cli.piano_roll.application",
+    "flstudio_cli.piano_roll.domain",
+]
+
+# ---------------------------------------------------------------------------
+# Feature: plugin
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "flstudio_cli.plugin.application"
+depends_on = []
+
+[[modules]]
+path = "flstudio_cli.plugin.presentation"
+depends_on = []
+
+# ---------------------------------------------------------------------------
+# Feature: project
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "flstudio_cli.project.application"
+depends_on = []
+
+[[modules]]
+path = "flstudio_cli.project.presentation"
+depends_on = []
+
+# ---------------------------------------------------------------------------
+# Feature: state
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "flstudio_cli.state.domain"
+depends_on = []
+
+[[modules]]
+path = "flstudio_cli.state.application"
+depends_on = [
+    "flstudio_cli.state.domain",
+]
+
+[[modules]]
+path = "flstudio_cli.state.presentation"
+depends_on = [
+    "flstudio_cli.state.application",
+]
+
+# state.composition lives at the feature root (one file). It composes
+# state's IO-bound batch handlers with the production PianoRollIO and is
+# imported only by the composition root in __main__.
+
+# ---------------------------------------------------------------------------
+# Feature: transport
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "flstudio_cli.transport.application"
+depends_on = []
+
+[[modules]]
+path = "flstudio_cli.transport.presentation"
+depends_on = []
+
+# ---------------------------------------------------------------------------
+# Composition root
+# ---------------------------------------------------------------------------
+# `__main__.py` is the single composition root. It walks entry_points to
+# discover features and wires the production effects into the dispatcher,
+# so it intentionally reaches into batch.application + state.composition.
+
+[[modules]]
+path = "flstudio_cli.__main__"
+depends_on = [
+    "flstudio_cli.batch.application",
+]

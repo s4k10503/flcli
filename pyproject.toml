@@ -1,0 +1,158 @@
+[project]
+name = "flstudio-cli"
+version = "0.1.0"
+description = "LLM-friendly CLI to control FL Studio via a virtual MIDI port"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["mido>=1.3.0", "python-rtmidi>=1.5.0", "click>=8.1"]
+
+[project.optional-dependencies]
+flp = ["pyflp>=2.0.0"]
+auto-trigger = ["pynput>=1.7.0"]
+all = ["flstudio-cli[flp]", "flstudio-cli[auto-trigger]"]
+
+[project.scripts]
+flcli = "flstudio_cli.__main__:cli"
+
+[project.entry-points."flstudio_cli.features"]
+# Each entry maps a stable feature name to its FEATURE constant. Adding
+# a new feature is one line here plus a FEATURE definition in the
+# feature package's `feature.py` module — no edits to __main__.py
+# required. The constants intentionally live in a non-`__init__` module
+# so cross-feature imports can't trigger circular initialisation.
+batch = "flstudio_cli.batch.feature:FEATURE"
+completion = "flstudio_cli.completion.feature:FEATURE"
+config = "flstudio_cli.config.feature:FEATURE"
+flp = "flstudio_cli.flp_cli.feature:FEATURE"
+mixer = "flstudio_cli.mixer.feature:FEATURE"
+piano_roll = "flstudio_cli.piano_roll.feature:FEATURE"
+plugin = "flstudio_cli.plugin.feature:FEATURE"
+project = "flstudio_cli.project.feature:FEATURE"
+state = "flstudio_cli.state.feature:FEATURE"
+transport = "flstudio_cli.transport.feature:FEATURE"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8.0",
+    "pyright>=1.1.380",
+    "pytest>=8.0",
+    "pre-commit>=4.0",
+    "tach>=0.34.1",
+    "pytest-cov>=5.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flstudio_cli"]
+artifacts = ["**/*.pyscript"]
+exclude = [
+    "**/tests",
+    "**/tests/**",
+    "**/conftest.py",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["src/flstudio_cli"]
+pythonpath = ["."]
+# Tach ships a pytest plugin that auto-loads when tach is installed and
+# prints impact-analysis hints on every run. We enforce architecture via
+# `tach check` in CI separately, so silence the plugin to keep test output
+# clean. Opt back in per-invocation with `pytest --tach` if needed.
+addopts = "-p no:tach"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["src"]
+# device_flcli.py runs inside FL Studio's Python sandbox; it carries
+# constructs that the host-side ruff can't sensibly lint.
+exclude = ["src/flstudio_cli/shared/infrastructure/fl_device/device_flcli.py"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "N",   # pep8-naming
+    "RUF", # ruff-specific rules
+    "C4",  # flake8-comprehensions
+    "T20", # flake8-print
+    "PTH", # flake8-use-pathlib (force pathlib over os.path)
+    "PERF",# perflint (catch list-copy / unnecessary cast anti-patterns)
+    "RET", # flake8-return (clean early-return / no unnecessary else)
+    "TRY", # tryceratops (raise discipline; specialize broad RuntimeError)
+    "FA",  # future-annotations (force `from __future__ import annotations`)
+]
+ignore = [
+    "E501",   # line length (handled by formatter)
+    "T201",   # print found (CLI tool uses click.echo but tests may use print)
+    "N812",   # allow short aliases for module imports (D, P, Env, etc.)
+    "N818",   # exception names without Error suffix (public API stability)
+    "SIM105", # contextlib.suppress less readable for multi-line assignments
+    "TRY003", # long messages outside exception class -- our errors are deliberate
+    "TRY300", # else-after-try-return reduces readability for our handler shape
+    "TRY301", # raise-within-try is fine when wrapping with a typed re-raise
+    "PERF203",# try/except in loop is unavoidable for per-item I/O failure isolation
+    "RET504", # unnecessary assignment before return -- often clearer with named result
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["flstudio_cli"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["T20", "B011", "SIM117"]
+"conftest.py" = ["T20", "B011", "SIM117"]
+"src/flstudio_cli/batch/application/batch.py" = ["F401"]  # intentional re-exports
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+include = ["src"]
+exclude = [
+    "src/flstudio_cli/shared/infrastructure/fl_device/device_flcli.py",
+    "**/tests",
+    "**/conftest.py",
+]
+reportMissingImports = "warning"
+reportMissingTypeStubs = false
+reportMissingModuleSource = false
+reportAttributeAccessIssue = "warning"
+
+[tool.coverage.run]
+source = ["src/flstudio_cli"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/conftest.py",
+    # device_flcli.py runs inside FL Studio's embedded Python sandbox;
+    # it imports modules that don't exist on the host (channels, device,
+    # ...) and isn't reachable from any test, so counting it would just
+    # depress the percentage.
+    "src/flstudio_cli/shared/infrastructure/fl_device/device_flcli.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    # `assert_never(...)` arms are statically unreachable; counting them
+    # against coverage punishes the closed-sum design we deliberately use.
+    "assert_never\\(",
+    "raise NotImplementedError",
+    # Standard "if __name__ == '__main__':" guards aren't exercised by tests.
+    "if __name__ == .__main__.:",
+    # `if TYPE_CHECKING:` blocks exist purely for type-checkers.
+    "if TYPE_CHECKING:",
+]
