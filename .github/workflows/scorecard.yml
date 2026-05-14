@@ -40,6 +40,11 @@ jobs:
         with:
           results_file: results.sarif
           results_format: sarif
+          # Read-only PAT scoped to this repo with `Administration: Read` so
+          # Scorecard can evaluate the Branch-Protection check. Without it
+          # the check is skipped with `internal error: some github tokens
+          # can't read…` and the overall score loses several points.
+          repo_token: ${{ secrets.SCORECARD_READ_TOKEN }}
           # Publish the results for public repositories to enable scorecard badges.
           # For more details: https://github.com/ossf/scorecard-action#publishing-results
           publish_results: true
