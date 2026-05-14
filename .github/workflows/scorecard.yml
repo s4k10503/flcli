@@ -1,0 +1,49 @@
+name: Scorecard supply-chain security
+
+on:
+  branch_protection_rule:
+  # Weekly scan — Monday 05:23 UTC.
+  schedule:
+    - cron: "23 5 * * 1"
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: scorecard-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed to publish results and get a badge (see publish_results below).
+      id-token: write
+      # Uncomment the permissions below if installing in a private repository.
+      # contents: read
+      # actions: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@6c3c2f2c1c457b00c10c4848d6f5491db3b629df # v2.18.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publish the results for public repositories to enable scorecard badges.
+          # For more details: https://github.com/ossf/scorecard-action#publishing-results
+          publish_results: true
+
+      # NOTE: upload-sarif step removed — Code Scanning is not available
+      # for personal-account repos. The Scorecard badge still works via
+      # publish_results: true (uses the Scorecard public API, not SARIF).

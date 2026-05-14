@@ -4,6 +4,10 @@
 > development has stopped — forks are explicitly encouraged. Issues and
 > PRs filed on this repository may not be reviewed.
 
+[![CI](https://github.com/s4k10503/flcli/actions/workflows/ci.yml/badge.svg)](https://github.com/s4k10503/flcli/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/s4k10503/flcli/badge)](https://scorecard.dev/viewer/?uri=github.com/s4k10503/flcli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 [日本語](README.md) | [English](README.en.md)
 
 LLM フレンドリーな FL Studio 制御用 CLI。SysEx 双方向プロトコル経由で
