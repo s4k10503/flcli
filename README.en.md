@@ -224,6 +224,33 @@ flcli plugin param set 0.5 --track 5 --param-name "Mix"
 old value: VST3 / CLAP plugins take a host change on their next audio block,
 so a `param get` a moment later shows the applied value.
 
+### Reading and setting by what the plugin shows
+
+FL only takes a plugin parameter as 0.0 - 1.0. These commands move the
+value and read the display back, so you can work in the plugin's own units.
+
+```bash
+# What the display reads across 0..1 (the value is put back afterwards)
+flcli plugin param map --track 16 --param-name "High cut" --steps 8
+
+# Set by the number shown (Hz, dB, ms, s, %, ...; kHz counts as 1000)
+flcli plugin param seek --track 16 --param-name "High cut" --to 5000
+flcli plugin param seek --track 16 --param-name "Decay time" --to 3
+
+# Set by a label (a waveform, a mode, ...)
+flcli plugin param seek --track 16 --param-name "Stereo separation" --label Original
+
+# Step through FL's preset list
+flcli plugin preset next --channel 6
+flcli plugin preset prev --track 16
+```
+
+`--to` needs a display that only rises (or only falls) over 0..1. A word at
+either end, such as "Off", is skipped and the numeric range inside is
+searched. A target out of range, or a label no value shows, puts the old
+value back and returns an error. VST3 / CLAP displays change a moment after
+the value, so each read waits `--settle-ms` (60 by default).
+
 ## Mixer
 
 The `flcli mixer` group operates on mixer tracks:
@@ -255,6 +282,34 @@ flcli mixer route --from 1 --to 0 --on    # Enable send from track 1 → 0
 # Channel link
 flcli mixer link-to-channel --track 1      # Link to currently selected channel
 ```
+
+### Built-in EQ, sends, stereo width, polarity, meters
+
+```bash
+# Built-in three-band EQ (band 0 = low shelf, 1 = peak, 2 = high shelf)
+flcli mixer eq get --track 5
+flcli mixer eq set --track 5 --band 0 --gain-db -12 --freq-hz 80
+flcli mixer eq set --track 5 --band 1 --gain 0.4 --bandwidth 0.5   # normalised works too
+
+# Send level (sidechain sends too; 0.8 = 0 dB)
+flcli mixer send get --from 1 --to 5
+flcli mixer send set 0.8 --from 1 --to 5
+
+# Stereo separation (-1.0 - 1.0; 0 leaves it as it is)
+flcli mixer stereo get --track 6
+flcli mixer stereo set --track 6 -- -0.3
+
+# Polarity inversion (no flag shows the current state)
+flcli mixer polarity --track 6 --on
+
+# Peak meters right now (read while playing; 1.0 = 0 dBFS, dB included)
+flcli mixer peaks --track 0 --track 1 --track 5
+```
+
+FL applies EQ and stereo changes a moment later, so `eq set` and
+`stereo set` read the track back before answering. `--gain-db` and
+`--freq-hz` are found by setting and reading back, which takes about a
+second each.
 
 ## Melody / piano roll
 

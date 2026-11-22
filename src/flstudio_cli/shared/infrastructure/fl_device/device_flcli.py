@@ -30,6 +30,7 @@ MIDI recorder.
 """
 
 import json
+import math
 import time
 
 import channels
@@ -336,6 +337,53 @@ class FLStudioBackend:
         except Exception:
             pass
 
+    # Built-in track EQ (three bands), send levels, stereo, polarity, meters.
+    # ``mode=1`` reads FL's own units (dB / Hz) where the API offers it.
+
+    def mixer_eq_band_count(self):
+        return int(mixer.getEqBandCount())
+
+    def mixer_eq_band(self, index, band):
+        return {
+            "band": band,
+            "gain": round(mixer.getEqGain(index, band), 6),
+            "gain_db": round(mixer.getEqGain(index, band, 1), 2),
+            "freq": round(mixer.getEqFrequency(index, band), 6),
+            "freq_hz": round(mixer.getEqFrequency(index, band, 1), 1),
+            "bandwidth": round(mixer.getEqBandwidth(index, band), 6),
+        }
+
+    def mixer_set_eq_gain(self, index, band, value):
+        mixer.setEqGain(index, band, value)
+
+    def mixer_set_eq_frequency(self, index, band, value):
+        mixer.setEqFrequency(index, band, value)
+
+    def mixer_set_eq_bandwidth(self, index, band, value):
+        mixer.setEqBandwidth(index, band, value)
+
+    def mixer_get_route_level(self, from_idx, to_idx):
+        return mixer.getRouteToLevel(from_idx, to_idx)
+
+    def mixer_set_route_level(self, from_idx, to_idx, level):
+        mixer.setRouteToLevel(from_idx, to_idx, level)
+
+    def mixer_get_stereo_sep(self, index):
+        return mixer.getTrackStereoSep(index)
+
+    def mixer_set_stereo_sep(self, index, value):
+        mixer.setTrackStereoSep(index, value)
+
+    def mixer_is_polarity_reversed(self, index):
+        return bool(mixer.isTrackRevPolarity(index))
+
+    def mixer_set_polarity(self, index, reversed_):
+        mixer.revTrackPolarity(index, 1 if reversed_ else 0)
+
+    def mixer_get_peaks(self, index):
+        # Modes 0 / 1 = left / right channel (linear, 1.0 = 0 dBFS).
+        return mixer.getTrackPeaks(index, 0), mixer.getTrackPeaks(index, 1)
+
     def mixer_selected_track(self):
         try:
             return mixer.trackNumber()
@@ -386,6 +434,15 @@ class FLStudioBackend:
 
     def plugin_get_param_value_string(self, param, channel, slot=-1):
         return plugins.getParamValueString(param, channel, slot)
+
+    def plugin_preset_count(self, channel, slot=-1):
+        return plugins.getPresetCount(channel, slot)
+
+    def plugin_preset_step(self, channel, slot, forward):
+        if forward:
+            plugins.nextPreset(channel, slot)
+        else:
+            plugins.prevPreset(channel, slot)
 
     # --- State snapshot --------------------------------------------------
 
@@ -937,6 +994,90 @@ def _build_v2_dispatcher(backend):
         backend.mixer_set_route_to(from_idx, to_idx, enabled)
         return {"from": from_idx, "to": to_idx, "on": enabled}
 
+    def _eq_band(track, args):
+        band = int(args["band"])
+        if not 0 <= band < backend.mixer_eq_band_count():
+            raise _HandlerError(CODE_INVALID_ARGUMENT, f"band {band} out of range")
+        return band
+
+    def _mixer_eq_get(args):
+        track = int(args["track"])
+        count = backend.mixer_eq_band_count()
+        return {"track": track, "bands": [backend.mixer_eq_band(track, b) for b in range(count)]}
+
+    def _mixer_eq_set(args):
+        # FL applies these after the handler returns, so a read-back here
+        # still shows the old values: answer with what was asked. The host
+        # reads the band again (``mixer_eq_get``) once FL has applied it.
+        track = int(args["track"])
+        band = _eq_band(track, args)
+        applied = {}
+        for key, setter in (
+            ("gain", backend.mixer_set_eq_gain),
+            ("freq", backend.mixer_set_eq_frequency),
+            ("bandwidth", backend.mixer_set_eq_bandwidth),
+        ):
+            if key in args:
+                value = float(args[key])
+                setter(track, band, value)
+                applied[key] = value
+        return {"track": track, "band": band, "requested": applied}
+
+    def _mixer_send_get(args):
+        src = int(args["from"])
+        dst = int(args["to"])
+        return {
+            "from": src,
+            "to": dst,
+            "active": backend.mixer_get_route_send_active(src, dst),
+            "level": round(backend.mixer_get_route_level(src, dst), 4),
+        }
+
+    def _mixer_send_set(args):
+        src = int(args["from"])
+        dst = int(args["to"])
+        backend.mixer_set_route_level(src, dst, float(args["level"]))
+        return _mixer_send_get(args)
+
+    def _mixer_stereo_get(args):
+        track = int(args["track"])
+        return {"track": track, "stereo_sep": round(backend.mixer_get_stereo_sep(track), 4)}
+
+    def _mixer_stereo_set(args):
+        # Applied after the handler returns, like the EQ (see above).
+        track = int(args["track"])
+        value = float(args["value"])
+        backend.mixer_set_stereo_sep(track, value)
+        return {"track": track, "requested": value}
+
+    def _mixer_polarity(args):
+        track = int(args["track"])
+        if "on" in args:
+            backend.mixer_set_polarity(track, bool(args["on"]))
+        return {"track": track, "reversed": backend.mixer_is_polarity_reversed(track)}
+
+    def _to_db(level):
+        # 1.0 is 0 dBFS; silence has no dB value.
+        return round(20 * math.log10(level), 1) if level > 0 else None
+
+    def _mixer_peaks(args):
+        tracks = args.get("tracks")
+        if tracks is None:
+            tracks = list(range(backend.mixer_track_count()))
+        out = []
+        for t in tracks:
+            left, right = backend.mixer_get_peaks(int(t))
+            out.append(
+                {
+                    "track": int(t),
+                    "left": round(left, 5),
+                    "right": round(right, 5),
+                    "left_db": _to_db(left),
+                    "right_db": _to_db(right),
+                }
+            )
+        return {"peaks": out}
+
     def _mixer_link_to_channel(args):
         track = int(args["track"])
         channel = int(args["channel"])
@@ -1148,6 +1289,23 @@ def _build_v2_dispatcher(backend):
             "pending": abs(readback - value) > 0.01,
         }
 
+    def _plugin_preset(args):
+        channel = int(args["channel"])
+        slot = int(args.get("slot", -1))
+        plugin_name = _require_plugin(channel, slot)
+        direction = str(args.get("direction", "next"))
+        if direction not in ("next", "prev"):
+            raise _HandlerError(CODE_INVALID_ARGUMENT, "direction must be next or prev")
+        backend.plugin_preset_step(channel, slot, direction == "next")
+        return {
+            "plugin_name": plugin_name,
+            "channel": channel,
+            "slot": slot,
+            "direction": direction,
+            "preset_count": backend.plugin_preset_count(channel, slot),
+        }
+
+    dispatcher.register("plugin_preset", _plugin_preset)
     dispatcher.register("plugin_list", _plugin_list)
     dispatcher.register("plugin_params", _plugin_params)
     dispatcher.register("plugin_param_get", _plugin_param_get)
@@ -1262,6 +1420,14 @@ def _build_v2_dispatcher(backend):
     dispatcher.register("mixer_arm", _mixer_arm)
     dispatcher.register("mixer_route_set", _mixer_route_set)
     dispatcher.register("mixer_link_to_channel", _mixer_link_to_channel)
+    dispatcher.register("mixer_eq_get", _mixer_eq_get)
+    dispatcher.register("mixer_eq_set", _mixer_eq_set)
+    dispatcher.register("mixer_send_get", _mixer_send_get)
+    dispatcher.register("mixer_send_set", _mixer_send_set)
+    dispatcher.register("mixer_stereo_get", _mixer_stereo_get)
+    dispatcher.register("mixer_stereo_set", _mixer_stereo_set)
+    dispatcher.register("mixer_polarity", _mixer_polarity)
+    dispatcher.register("mixer_peaks", _mixer_peaks)
     return dispatcher
 
 

@@ -112,6 +112,71 @@ def _handle_mixer_link_to_channel(args: dict[str, Any]) -> DeviceCommand:
     )
 
 
+def _optional_float(args: dict[str, Any], key: str) -> float | None:
+    return require_float(args, key) if key in args else None
+
+
+@lift_exceptions
+def _handle_mixer_eq_get(args: dict[str, Any]) -> DeviceCommand:
+    """Read the built-in three-band EQ of a mixer track."""
+    return fl.mixer_eq_get(track=require_int(args, "track"))
+
+
+@lift_exceptions
+def _handle_mixer_eq_set(args: dict[str, Any]) -> DeviceCommand:
+    """Set one band of a mixer track's built-in EQ (normalised values)."""
+    return fl.mixer_eq_set(
+        track=require_int(args, "track"),
+        band=require_int(args, "band"),
+        gain=_optional_float(args, "gain"),
+        freq=_optional_float(args, "freq"),
+        bandwidth=_optional_float(args, "bandwidth"),
+    )
+
+
+@lift_exceptions
+def _handle_mixer_send_get(args: dict[str, Any]) -> DeviceCommand:
+    """Read a send's on/off state and level."""
+    return fl.mixer_send_get(src=require_int(args, "from"), dst=require_int(args, "to"))
+
+
+@lift_exceptions
+def _handle_mixer_send_set(args: dict[str, Any]) -> DeviceCommand:
+    """Set a send level (0.0 - 1.0, sidechain sends included)."""
+    return fl.mixer_send_set(
+        src=require_int(args, "from"),
+        dst=require_int(args, "to"),
+        level=require_float(args, "level"),
+    )
+
+
+_handle_mixer_stereo_get, _handle_mixer_stereo_set = _make_mixer_field_handlers(
+    lambda track: fl.mixer_stereo_get(track=track),
+    lambda **kw: fl.mixer_stereo_set(**kw),
+    "value",
+    require_float,
+)
+
+
+@lift_exceptions
+def _handle_mixer_polarity(args: dict[str, Any]) -> DeviceCommand:
+    """Read, or set with ``on``, a mixer track's polarity inversion."""
+    return fl.mixer_polarity(
+        track=require_int(args, "track"), on=optional_bool(args, "on")
+    )
+
+
+@lift_exceptions
+def _handle_mixer_peaks(args: dict[str, Any]) -> DeviceCommand:
+    """Read the current peak meters (all tracks, or ``tracks``)."""
+    tracks = args.get("tracks")
+    if tracks is not None and not (
+        isinstance(tracks, list) and all(isinstance(t, int) for t in tracks)
+    ):
+        raise ValueError("'tracks' must be a list of integers")
+    return fl.mixer_peaks(tracks=tracks)
+
+
 BATCH_HANDLERS: dict[str, BatchHandler] = {
     "mixer_list": _handle_mixer_list,
     "mixer_volume_get": _handle_mixer_volume_get,
@@ -125,4 +190,12 @@ BATCH_HANDLERS: dict[str, BatchHandler] = {
     "mixer_arm": _handle_mixer_arm,
     "mixer_route_set": _handle_mixer_route_set,
     "mixer_link_to_channel": _handle_mixer_link_to_channel,
+    "mixer_eq_get": _handle_mixer_eq_get,
+    "mixer_eq_set": _handle_mixer_eq_set,
+    "mixer_send_get": _handle_mixer_send_get,
+    "mixer_send_set": _handle_mixer_send_set,
+    "mixer_stereo_get": _handle_mixer_stereo_get,
+    "mixer_stereo_set": _handle_mixer_stereo_set,
+    "mixer_polarity": _handle_mixer_polarity,
+    "mixer_peaks": _handle_mixer_peaks,
 }
