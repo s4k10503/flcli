@@ -217,6 +217,32 @@ flcli plugin param set 0.5 --track 5 --param-name "Mix"
 `param set` の結果の `pending: true` は、プラグインがまだ前の値を返していることを示します。
 VST3 / CLAP は次の音声処理で値を受け取るため、少し後の `param get` で反映後の値を読めます。
 
+### 表示値で読む・決める
+
+プラグインのパラメータは 0.0〜1.0 でしか渡せません。
+そこで実際に値を動かして表示を読み戻し、表示の単位で扱えるようにしています。
+
+```bash
+# 0〜1 を動かしたときの表示の対応表 (終わったら元の値に戻す)
+flcli plugin param map --track 16 --param-name "High cut" --steps 8
+
+# 表示の数値で設定 (Hz・dB・ms・秒・% など。kHz は 1000 倍で数える)
+flcli plugin param seek --track 16 --param-name "High cut" --to 5000
+flcli plugin param seek --track 16 --param-name "Decay time" --to 3
+
+# 表示の文字で設定 (波形の種類やモードなど)
+flcli plugin param seek --track 16 --param-name "Stereo separation" --label Original
+
+# FL のプリセット一覧で次・前へ
+flcli plugin preset next --channel 6
+flcli plugin preset prev --track 16
+```
+
+`--to` は表示が 0〜1 で一方向に増える（または減る）パラメータに使えます。
+端の表示が "Off" のような文字でも内側の数値の範囲で探します。
+範囲外の値や見つからない文字を指定したときは元の値に戻してからエラーを返します。
+VST3 / CLAP の表示は少し遅れて変わるので、読み戻す前に `--settle-ms`（既定 60）だけ待ちます。
+
 ## ミキサー
 
 `flcli mixer` グループでミキサートラックの操作ができます:
@@ -248,6 +274,33 @@ flcli mixer route --from 1 --to 0 --on    # トラック1→0へセンド有効�
 # チャンネルリンク
 flcli mixer link-to-channel --track 1      # 選択中チャンネルにリンク
 ```
+
+### 内蔵 EQ・センド・ステレオ幅・位相・メーター
+
+```bash
+# 内蔵 3 バンド EQ (バンド 0 = ローシェルフ, 1 = ピーク, 2 = ハイシェルフ)
+flcli mixer eq get --track 5
+flcli mixer eq set --track 5 --band 0 --gain-db -12 --freq-hz 80
+flcli mixer eq set --track 5 --band 1 --gain 0.4 --bandwidth 0.5   # 正規化値でも可
+
+# センド量 (サイドチェイン用のセンドも同じ。0.8 = 0 dB)
+flcli mixer send get --from 1 --to 5
+flcli mixer send set 0.8 --from 1 --to 5
+
+# ステレオ幅 (-1.0〜1.0。0 は元のまま)
+flcli mixer stereo get --track 6
+flcli mixer stereo set --track 6 -- -0.3
+
+# 位相反転 (引数なしで現在の状態)
+flcli mixer polarity --track 6 --on
+
+# いまのピーク (再生中に読む。1.0 = 0 dBFS。dB も返す)
+flcli mixer peaks --track 0 --track 1 --track 5
+```
+
+EQ とステレオ幅は FL が少し後に反映します。
+そのため `eq set` と `stereo set` は設定後に読み戻した値を返します。
+`--gain-db` と `--freq-hz` は設定と読み戻しを繰り返して探すので1秒ほどかかります。
 
 ## メロディ / ピアノロール
 

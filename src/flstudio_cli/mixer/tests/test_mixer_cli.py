@@ -303,3 +303,96 @@ class TestMixerTrackSelectorLiveResolution:
         assert payload["ok"] is False
         assert payload["error"]["code"] == Env.CODE_NOT_FOUND
         assert "Vocals" in payload["error"]["message"]
+
+
+class TestMixerEqSendStereoDryRun:
+    @pytest.mark.parametrize(
+        "argv,cmd,args",
+        [
+            (
+                ["mixer", "eq", "set", "-t", "5", "--band", "0", "--gain", "0.4"],
+                "mixer_eq_set",
+                {"track": 5, "band": 0, "gain": 0.4},
+            ),
+            (["mixer", "eq", "get", "-t", "5"], "mixer_eq_get", {"track": 5}),
+            (
+                ["mixer", "send", "set", "0.8", "--from", "1", "--to", "5"],
+                "mixer_send_set",
+                {"from": 1, "to": 5, "level": 0.8},
+            ),
+            (
+                ["mixer", "send", "get", "--from", "1", "--to", "5"],
+                "mixer_send_get",
+                {"from": 1, "to": 5},
+            ),
+            (
+                ["mixer", "stereo", "set", "-t", "2", "--", "-0.5"],
+                "mixer_stereo_set",
+                {"track": 2, "value": -0.5},
+            ),
+            (
+                ["mixer", "polarity", "-t", "2", "--on"],
+                "mixer_polarity",
+                {"track": 2, "on": True},
+            ),
+            (
+                ["mixer", "peaks", "-t", "1", "-t", "5"],
+                "mixer_peaks",
+                {"tracks": [1, 5]},
+            ),
+        ],
+    )
+    def test_request_shape(self, runner, argv, cmd, args):
+        result = runner.invoke(cli, ["--dry-run", *argv], obj={})
+        assert result.exit_code == 0, result.output
+        req = _parse_first_line(result.output)["result"]["request"]
+        assert req["cmd"] == cmd
+        assert req["args"] == args
+
+
+class _FakeEq:
+    """Stands in for FL: band 0 of one track."""
+
+    def __init__(self) -> None:
+        self.gain, self.freq = 0.5, 0.088
+
+    def send(self, ctx, command, args=None, **_kw):
+        if command == "mixer_eq_set":
+            self.gain = args.get("gain", self.gain)
+            self.freq = args.get("freq", self.freq)
+            return {"requested": {}}
+        band = {
+            "band": 0,
+            "gain": self.gain,
+            "gain_db": round((self.gain - 0.5) * 36, 2),
+            "freq": self.freq,
+            "freq_hz": round(10 * 1600**self.freq, 1),
+            "bandwidth": 0.267,
+        }
+        return {"track": 5, "bands": [band]}
+
+
+class TestMixerEqSetByUnits:
+    @pytest.fixture
+    def fake_eq(self, monkeypatch):
+        from flstudio_cli.mixer.presentation import cmd_mixer
+
+        eq = _FakeEq()
+        monkeypatch.setattr(cmd_mixer, "_send_v2", eq.send)
+        return eq
+
+    def test_sets_db_and_hz_by_reading_back(self, runner, fake_eq):
+        argv = ["mixer", "eq", "set", "-t", "5", "-b", "0", "--gain-db", "-12"]
+        argv += ["--freq-hz", "80", "--settle-ms", "0"]
+        result = runner.invoke(cli, argv, obj={})
+        out = _parse_first_line(result.output)
+        assert out["ok"] is True, result.output
+        assert abs(out["result"]["gain_db"] + 12) < 0.05
+        assert abs(out["result"]["freq_hz"] - 80) < 0.5
+
+    def test_out_of_range_db_fails(self, runner, fake_eq):
+        argv = ["mixer", "eq", "set", "-t", "5", "-b", "0", "--gain-db", "-40"]
+        result = runner.invoke(cli, [*argv, "--settle-ms", "0"], obj={})
+        out = _parse_first_line(result.output)
+        assert out["ok"] is False
+        assert "outside" in out["error"]["message"]

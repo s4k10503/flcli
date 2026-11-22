@@ -69,9 +69,23 @@ def _handle_plugin_param_set(args: dict[str, Any]) -> DeviceCommand:
     )
 
 
+@lift_exceptions
+def _handle_plugin_preset(args: dict[str, Any]) -> DeviceCommand:
+    """Step a plugin to its next or previous preset."""
+    direction = require_string(args, "direction")
+    if direction not in ("next", "prev"):
+        raise ValueError("'direction' must be 'next' or 'prev'")
+    return fl.plugin_preset(
+        channel=require_int(args, "channel"),
+        slot=optional_int(args, "slot"),
+        direction=direction,
+    )
+
+
 BATCH_HANDLERS: dict[str, BatchHandler] = {
     "plugin_list": _handle_plugin_list,
     "plugin_params": _handle_plugin_params,
     "plugin_param_get": _handle_plugin_param_get,
     "plugin_param_set": _handle_plugin_param_set,
+    "plugin_preset": _handle_plugin_preset,
 }

@@ -82,10 +82,31 @@ class FlCommandPort(Protocol):
         self, *, src: int, dst: int, on: bool | None = None
     ) -> DeviceCommand: ...
     def mixer_link_to_channel(self, *, track: int, channel: int) -> DeviceCommand: ...
+    def mixer_eq_get(self, *, track: int) -> DeviceCommand: ...
+    def mixer_eq_set(
+        self,
+        *,
+        track: int,
+        band: int,
+        gain: float | None = None,
+        freq: float | None = None,
+        bandwidth: float | None = None,
+    ) -> DeviceCommand: ...
+    def mixer_send_get(self, *, src: int, dst: int) -> DeviceCommand: ...
+    def mixer_send_set(self, *, src: int, dst: int, level: float) -> DeviceCommand: ...
+    def mixer_stereo_get(self, *, track: int) -> DeviceCommand: ...
+    def mixer_stereo_set(self, *, track: int, value: float) -> DeviceCommand: ...
+    def mixer_polarity(
+        self, *, track: int, on: bool | None = None
+    ) -> DeviceCommand: ...
+    def mixer_peaks(self, *, tracks: list[int] | None = None) -> DeviceCommand: ...
 
     # --- plugin -----------------------------------------------------------
 
     def plugin_list(self, *, channel: int) -> DeviceCommand: ...
+    def plugin_preset(
+        self, *, channel: int, slot: int | None = None, direction: str
+    ) -> DeviceCommand: ...
     def plugin_params(
         self,
         *,
@@ -266,10 +287,61 @@ class DefaultFlCommands:
             "mixer_link_to_channel", {"track": track, "channel": channel}
         )
 
+    def mixer_eq_get(self, *, track: int) -> DeviceCommand:
+        return DeviceCommand("mixer_eq_get", {"track": track})
+
+    def mixer_eq_set(
+        self,
+        *,
+        track: int,
+        band: int,
+        gain: float | None = None,
+        freq: float | None = None,
+        bandwidth: float | None = None,
+    ) -> DeviceCommand:
+        return DeviceCommand(
+            "mixer_eq_set",
+            _drop_none(
+                {
+                    "track": track,
+                    "band": band,
+                    "gain": gain,
+                    "freq": freq,
+                    "bandwidth": bandwidth,
+                }
+            ),
+        )
+
+    def mixer_send_get(self, *, src: int, dst: int) -> DeviceCommand:
+        return DeviceCommand("mixer_send_get", {"from": src, "to": dst})
+
+    def mixer_send_set(self, *, src: int, dst: int, level: float) -> DeviceCommand:
+        return DeviceCommand("mixer_send_set", {"from": src, "to": dst, "level": level})
+
+    def mixer_stereo_get(self, *, track: int) -> DeviceCommand:
+        return DeviceCommand("mixer_stereo_get", {"track": track})
+
+    def mixer_stereo_set(self, *, track: int, value: float) -> DeviceCommand:
+        return DeviceCommand("mixer_stereo_set", {"track": track, "value": value})
+
+    def mixer_polarity(self, *, track: int, on: bool | None = None) -> DeviceCommand:
+        return DeviceCommand("mixer_polarity", _drop_none({"track": track, "on": on}))
+
+    def mixer_peaks(self, *, tracks: list[int] | None = None) -> DeviceCommand:
+        return DeviceCommand("mixer_peaks", _drop_none({"tracks": tracks}))
+
     # --- plugin -----------------------------------------------------------
 
     def plugin_list(self, *, channel: int) -> DeviceCommand:
         return DeviceCommand("plugin_list", {"channel": channel})
+
+    def plugin_preset(
+        self, *, channel: int, slot: int | None = None, direction: str
+    ) -> DeviceCommand:
+        return DeviceCommand(
+            "plugin_preset",
+            _drop_none({"channel": channel, "slot": slot, "direction": direction}),
+        )
 
     def plugin_params(
         self,

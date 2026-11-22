@@ -516,3 +516,147 @@ class TestFocusChannelEditor:
         piano = 3
         # Select first, then hide and show so FL reopens it on channel 6.
         assert calls == [("select", 6), ("hide", piano), ("show", piano)]
+
+
+class TestMixerEqSendStereo:
+    """Built-in EQ, sends, stereo, polarity, meters and presets on the device."""
+
+    @pytest.fixture
+    def eq(self, device_module, monkeypatch):
+        mx = sys.modules["mixer"]
+        state = {"gain": 0.5, "freq": 0.5, "bw": 0.267}
+
+        def gain(track, band, mode=0):
+            return (state["gain"] - 0.5) * 36 if mode == 1 else state["gain"]
+
+        def freq(track, band, mode=0):
+            return 20 * 1000 ** state["freq"] if mode == 1 else state["freq"]
+
+        for name, fn in {
+            "getEqBandCount": lambda: 3,
+            "getEqGain": gain,
+            "getEqFrequency": freq,
+            "getEqBandwidth": lambda track, band: state["bw"],
+            "setEqGain": lambda t, b, v: state.__setitem__("gain", v),
+            "setEqFrequency": lambda t, b, v: state.__setitem__("freq", v),
+            "setEqBandwidth": lambda t, b, v: state.__setitem__("bw", v),
+        }.items():
+            monkeypatch.setattr(mx, name, fn, raising=False)
+        return state
+
+    def test_eq_set_answers_with_what_was_asked(self, device_module, eq) -> None:
+        # FL applies the change after the handler returns, so the handler
+        # must not report a read-back as the new value.
+        result = device_module._V2_DISPATCH.dispatch(
+            "mixer_eq_set", {"track": 5, "band": 0, "gain": 0.25, "freq": 0.1}
+        )
+        assert result["ok"] is True, result
+        assert result["result"] == {
+            "track": 5,
+            "band": 0,
+            "requested": {"gain": 0.25, "freq": 0.1},
+        }
+        assert eq["gain"] == 0.25 and eq["freq"] == 0.1
+
+    def test_eq_rejects_a_band_out_of_range(self, device_module, eq) -> None:
+        result = device_module._V2_DISPATCH.dispatch(
+            "mixer_eq_set", {"track": 5, "band": 3, "gain": 0.4}
+        )
+        assert result["ok"] is False
+        assert result["error"]["code"] == device_module.CODE_INVALID_ARGUMENT
+
+    def test_eq_get_lists_every_band(self, device_module, eq) -> None:
+        result = device_module._V2_DISPATCH.dispatch("mixer_eq_get", {"track": 1})
+        assert [b["band"] for b in result["result"]["bands"]] == [0, 1, 2]
+
+    def test_send_level_round_trips(self, device_module, monkeypatch) -> None:
+        mx = sys.modules["mixer"]
+        levels = {}
+        monkeypatch.setattr(
+            mx,
+            "setRouteToLevel",
+            lambda s, d, v: levels.__setitem__((s, d), v),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            mx, "getRouteToLevel", lambda s, d: levels.get((s, d), 0.0), raising=False
+        )
+        monkeypatch.setattr(mx, "getRouteSendActive", lambda s, d: 1)
+        result = device_module._V2_DISPATCH.dispatch(
+            "mixer_send_set", {"from": 1, "to": 5, "level": 0.8}
+        )
+        assert result["result"] == {"from": 1, "to": 5, "active": 1, "level": 0.8}
+
+    def test_polarity_and_stereo(self, device_module, monkeypatch) -> None:
+        mx = sys.modules["mixer"]
+        state = {"rev": 0, "sep": 0.0}
+        monkeypatch.setattr(
+            mx,
+            "revTrackPolarity",
+            lambda i, v: state.__setitem__("rev", v),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            mx, "isTrackRevPolarity", lambda i: state["rev"], raising=False
+        )
+        monkeypatch.setattr(
+            mx,
+            "setTrackStereoSep",
+            lambda i, v: state.__setitem__("sep", v),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            mx, "getTrackStereoSep", lambda i: state["sep"], raising=False
+        )
+        pol = device_module._V2_DISPATCH.dispatch(
+            "mixer_polarity", {"track": 2, "on": True}
+        )
+        assert pol["result"] == {"track": 2, "reversed": True}
+        st = device_module._V2_DISPATCH.dispatch(
+            "mixer_stereo_set", {"track": 2, "value": -0.5}
+        )
+        assert st["result"] == {"track": 2, "requested": -0.5}
+        assert state["sep"] == -0.5
+
+    def test_peaks_for_named_tracks(self, device_module, monkeypatch) -> None:
+        mx = sys.modules["mixer"]
+        monkeypatch.setattr(
+            mx,
+            "getTrackPeaks",
+            lambda i, mode: 0.5 if mode == 0 else 0.25,
+            raising=False,
+        )
+        result = device_module._V2_DISPATCH.dispatch("mixer_peaks", {"tracks": [1, 5]})
+        assert result["result"]["peaks"] == [
+            {
+                "track": 1,
+                "left": 0.5,
+                "right": 0.25,
+                "left_db": -6.0,
+                "right_db": -12.0,
+            },
+            {
+                "track": 5,
+                "left": 0.5,
+                "right": 0.25,
+                "left_db": -6.0,
+                "right_db": -12.0,
+            },
+        ]
+
+    def test_preset_steps_the_right_way(self, device_module, monkeypatch) -> None:
+        plg = sys.modules["plugins"]
+        calls = []
+        monkeypatch.setattr(plg, "getPluginName", lambda ch, slot=-1, *a: "FLEX")
+        monkeypatch.setattr(
+            plg, "nextPreset", lambda c, s: calls.append("next"), raising=False
+        )
+        monkeypatch.setattr(
+            plg, "prevPreset", lambda c, s: calls.append("prev"), raising=False
+        )
+        monkeypatch.setattr(plg, "getPresetCount", lambda c, s: 12, raising=False)
+        result = device_module._V2_DISPATCH.dispatch(
+            "plugin_preset", {"channel": 6, "direction": "prev"}
+        )
+        assert calls == ["prev"]
+        assert result["result"]["preset_count"] == 12
