@@ -207,7 +207,15 @@ flcli plugin param get --channel 0 --param-name "Cutoff"
 # パラメータ設定 (0.0 - 1.0)
 flcli plugin param set 0.75 --channel 0 --param 5
 flcli plugin param set 0.5 --channel 0 --param-name "Resonance"
+
+# ミキサーのエフェクトは --track (ミキサートラック番号) で指定。--slot の既定は 0
+flcli plugin list --track 5
+flcli plugin params --track 5 --slot 0
+flcli plugin param set 0.5 --track 5 --param-name "Mix"
 ```
+
+`param set` の結果の `pending: true` は、プラグインがまだ前の値を返していることを示します。
+VST3 / CLAP は次の音声処理で値を受け取るため、少し後の `param get` で反映後の値を読めます。
 
 ## ミキサー
 

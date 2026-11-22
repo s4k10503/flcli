@@ -42,6 +42,9 @@ import plugins
 import transport
 import ui
 
+# Pickup mode for plugins.setParamValue: apply the value as sent.
+_PIM_NONE = getattr(midi, "PIM_None", 0)
+
 # === Error codes (must stay in sync with envelope.py on the CLI side) =======
 
 CODE_INVALID_ARGUMENT = "INVALID_ARGUMENT"
@@ -369,7 +372,10 @@ class FLStudioBackend:
         return plugins.getParamValue(param, channel, slot)
 
     def plugin_set_param_value(self, value, param, channel, slot=-1):
-        plugins.setParamValue(value, param, channel, slot)
+        # Pass the pickup mode explicitly. Left to FL's default, a jump to a
+        # value far from the current one can be held back as a "pickup" and
+        # never applied, so a CLI set would silently do nothing.
+        plugins.setParamValue(value, param, channel, slot, _PIM_NONE)
 
     def plugin_get_param_value_string(self, param, channel, slot=-1):
         return plugins.getParamValueString(param, channel, slot)
@@ -934,10 +940,13 @@ def _build_v2_dispatcher(backend):
 
     def _plugin_list(args):
         channel = int(args["channel"])
+        # With "mixer", `channel` is a mixer track: list its effect slots only
+        # (slot -1 would name the generator of the channel with that index).
+        mixer_track = bool(args.get("mixer", False))
         found = []
         # Native plugin (slot -1)
         try:
-            name = backend.plugin_get_name(channel, -1)
+            name = None if mixer_track else backend.plugin_get_name(channel, -1)
             if name:
                 found.append({"slot": -1, "name": name})
         except Exception:
@@ -958,6 +967,8 @@ def _build_v2_dispatcher(backend):
                 empty_streak += 1
                 if empty_streak >= 2:
                     break
+        if mixer_track:
+            return {"track": channel, "plugins": found}
         return {"channel": channel, "plugins": found}
 
     def _require_plugin(channel, slot):
@@ -1123,6 +1134,11 @@ def _build_v2_dispatcher(backend):
             "name": name,
             "value": round(readback, 6),
             "display": display,
+            "requested": value,
+            # VST3/CLAP plugins take a host change on their next audio block,
+            # so the read-back can still show the old value. `plugin param get`
+            # shows the applied one a moment later.
+            "pending": abs(readback - value) > 0.01,
         }
 
     dispatcher.register("plugin_list", _plugin_list)

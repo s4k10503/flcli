@@ -213,7 +213,16 @@ flcli plugin param get --channel 0 --param-name "Cutoff"
 # Set parameter (0.0 - 1.0)
 flcli plugin param set 0.75 --channel 0 --param 5
 flcli plugin param set 0.5 --channel 0 --param-name "Resonance"
+
+# Mixer effects: name the mixer track with --track (--slot defaults to 0)
+flcli plugin list --track 5
+flcli plugin params --track 5 --slot 0
+flcli plugin param set 0.5 --track 5 --param-name "Mix"
 ```
+
+`pending: true` in a `param set` result means the plugin still reports the
+old value: VST3 / CLAP plugins take a host change on their next audio block,
+so a `param get` a moment later shows the applied value.
 
 ## Mixer
 
