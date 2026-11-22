@@ -178,6 +178,13 @@ class FLStudioBackend:
         except Exception:
             pass
         if window == "piano_roll":
+            # An already open Piano Roll keeps showing the channel it was
+            # opened for; hide it first so showing it again picks up the
+            # channel selected above.
+            try:
+                ui.hideWindow(midi.widPianoRoll)
+            except Exception:
+                pass
             try:
                 ui.showWindow(midi.widPianoRoll)
             except Exception:
