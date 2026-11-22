@@ -131,6 +131,7 @@ def _install_fl_stubs() -> None:
 
     ui = sys.modules["ui"]
     ui.showWindow = lambda *a, **kw: None
+    ui.hideWindow = lambda *a, **kw: None
 
     device = sys.modules["device"]
     device.midiOutSysex = lambda payload: None
@@ -492,3 +493,26 @@ class TestPluginHandlers:
         }
         as_channel = device_module._V2_DISPATCH.dispatch("plugin_list", {"channel": 5})
         assert as_channel["result"]["plugins"][0] == {"slot": -1, "name": "FLEX"}
+
+
+class TestFocusChannelEditor:
+    """Opening the Piano Roll for a channel must retarget an open one."""
+
+    def test_piano_roll_is_hidden_then_shown(self, device_module, monkeypatch) -> None:
+        ui = sys.modules["ui"]
+        chans = sys.modules["channels"]
+        calls = []
+        monkeypatch.setattr(
+            chans, "selectOneChannel", lambda i: calls.append(("select", i))
+        )
+        monkeypatch.setattr(ui, "hideWindow", lambda w: calls.append(("hide", w)))
+        monkeypatch.setattr(ui, "showWindow", lambda w: calls.append(("show", w)))
+        monkeypatch.setattr(ui, "setFocused", lambda w: None, raising=False)
+        monkeypatch.setattr(sys.modules["midi"], "widPianoRoll", 3, raising=False)
+        result = device_module._V2_DISPATCH.dispatch(
+            "focus_channel_editor", {"channel": 6, "window": "piano_roll"}
+        )
+        assert result["ok"] is True, result
+        piano = 3
+        # Select first, then hide and show so FL reopens it on channel 6.
+        assert calls == [("select", 6), ("hide", piano), ("show", piano)]
