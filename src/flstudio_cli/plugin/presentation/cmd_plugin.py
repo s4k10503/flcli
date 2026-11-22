@@ -11,6 +11,38 @@ from flstudio_cli.shared.presentation.cli_dispatch import _dispatch_command
 from flstudio_cli.shared.presentation.cli_helpers import _fail, build_args_echo
 
 
+def _resolve_target(
+    command: str, channel: int | None, track: int | None, slot: int | None
+) -> tuple[int, int | None] | None:
+    """Map ``--channel`` / ``--track`` to FL's (index, slot) pair.
+
+    FL addresses an effect by the *mixer track* index plus a slot, and a
+    channel's own plugin by the channel index with slot -1. ``--track``
+    names the mixer track directly and defaults to slot 0, so a mixer effect
+    no longer has to be reached through ``--channel <track number>``.
+    Emits a failure envelope and returns ``None`` unless exactly one of the
+    two is given.
+    """
+    if (channel is None) == (track is None):
+        _fail(
+            command,
+            "give exactly one of --channel or --track",
+            code=Env.CODE_INVALID_ARGUMENT,
+        )
+        return None
+    if track is not None:
+        if slot is not None and slot < 0:
+            _fail(
+                command,
+                "--track needs an effect slot (0 or more)",
+                code=Env.CODE_INVALID_ARGUMENT,
+            )
+            return None
+        return track, 0 if slot is None else slot
+    assert channel is not None
+    return channel, slot
+
+
 def _build_param_v2_args(
     command: str,
     *,
@@ -49,12 +81,29 @@ def _plugin_group() -> None:
 
 
 @_plugin_group.command(
-    "list", help="List plugins on a channel (native + effect slots)."
+    "list", help="List plugins on a channel (native + effect slots) or a mixer track."
 )
-@click.option("--channel", "-c", required=True, type=int, help="Channel index.")
+@click.option("--channel", "-c", type=int, default=None, help="Channel index.")
+@click.option(
+    "--track",
+    "-t",
+    type=int,
+    default=None,
+    help="Mixer track index, for an effect in its slots (instead of --channel).",
+)
 @click.pass_context
-def _list_cmd(ctx: click.Context, channel: int) -> None:
-    _dispatch_command(ctx, "plugin_list", {"channel": channel})
+def _list_cmd(ctx: click.Context, channel: int | None, track: int | None) -> None:
+    if (channel is None) == (track is None):
+        _fail(
+            "plugin_list",
+            "give exactly one of --channel or --track",
+            code=Env.CODE_INVALID_ARGUMENT,
+        )
+        return
+    if track is not None:
+        _dispatch_command(ctx, "plugin_list", {"channel": track, "mixer": True})
+    else:
+        _dispatch_command(ctx, "plugin_list", {"channel": channel})
 
 
 @_plugin_group.command(
@@ -63,7 +112,14 @@ def _list_cmd(ctx: click.Context, channel: int) -> None:
     "Heavy plugins (Sytrus, Harmor, ...) expose hundreds of params, so the "
     "command paginates by default; use --limit/--offset to scan further.",
 )
-@click.option("--channel", "-c", required=True, type=int, help="Channel index.")
+@click.option("--channel", "-c", type=int, default=None, help="Channel index.")
+@click.option(
+    "--track",
+    "-t",
+    type=int,
+    default=None,
+    help="Mixer track index, for an effect in its slots (instead of --channel).",
+)
 @click.option(
     "--slot",
     "-s",
@@ -89,11 +145,16 @@ def _list_cmd(ctx: click.Context, channel: int) -> None:
 @click.pass_context
 def _params_cmd(
     ctx: click.Context,
-    channel: int,
+    channel: int | None,
+    track: int | None,
     slot: int | None,
     limit: int,
     offset: int,
 ) -> None:
+    target = _resolve_target("plugin_params", channel, track, slot)
+    if target is None:
+        return
+    channel, slot = target
     v2_args = build_args_echo(
         {"channel": channel, "limit": limit, "offset": offset},
         slot=slot,
@@ -112,7 +173,14 @@ def _param_group() -> None:
     "get",
     help="Get a single plugin parameter (normalised value + display string).",
 )
-@click.option("--channel", "-c", required=True, type=int, help="Channel index.")
+@click.option("--channel", "-c", type=int, default=None, help="Channel index.")
+@click.option(
+    "--track",
+    "-t",
+    type=int,
+    default=None,
+    help="Mixer track index, for an effect in its slots (instead of --channel).",
+)
 @click.option(
     "--slot",
     "-s",
@@ -134,11 +202,16 @@ def _param_group() -> None:
 @click.pass_context
 def _param_get_cmd(
     ctx: click.Context,
-    channel: int,
+    channel: int | None,
+    track: int | None,
     slot: int | None,
     param_index: int | None,
     param_name: str | None,
 ) -> None:
+    target = _resolve_target("plugin_param_get", channel, track, slot)
+    if target is None:
+        return
+    channel, slot = target
     v2_args = _build_param_v2_args(
         "plugin_param_get",
         channel=channel,
@@ -156,7 +229,14 @@ def _param_get_cmd(
     help="Set a plugin parameter value (0.0 - 1.0).",
 )
 @click.argument("value", type=float)
-@click.option("--channel", "-c", required=True, type=int, help="Channel index.")
+@click.option("--channel", "-c", type=int, default=None, help="Channel index.")
+@click.option(
+    "--track",
+    "-t",
+    type=int,
+    default=None,
+    help="Mixer track index, for an effect in its slots (instead of --channel).",
+)
 @click.option(
     "--slot",
     "-s",
@@ -179,11 +259,16 @@ def _param_get_cmd(
 def _param_set_cmd(
     ctx: click.Context,
     value: float,
-    channel: int,
+    channel: int | None,
+    track: int | None,
     slot: int | None,
     param_index: int | None,
     param_name: str | None,
 ) -> None:
+    target = _resolve_target("plugin_param_set", channel, track, slot)
+    if target is None:
+        return
+    channel, slot = target
     v2_args = _build_param_v2_args(
         "plugin_param_set",
         channel=channel,

@@ -108,7 +108,7 @@ def _install_fl_stubs() -> None:
     plg.getParamCount = lambda channel, slot=-1: 0
     plg.getParamName = lambda param, channel, slot=-1: ""
     plg.getParamValue = lambda param, channel, slot=-1: 0.0
-    plg.setParamValue = lambda value, param, channel, slot=-1: None
+    plg.setParamValue = lambda value, param, channel, slot=-1, pickup=0: None
     plg.getParamValueString = lambda param, channel, slot=-1: ""
 
     transport = sys.modules["transport"]
@@ -453,3 +453,42 @@ class TestStateHandlerDottedPath:
         )
         assert result["ok"] is False
         assert result["error"]["code"] == "INTERNAL"
+
+
+class TestPluginHandlers:
+    """Mixer-effect listing and parameter writes on the device side."""
+
+    def test_param_set_passes_no_pickup(self, device_module, monkeypatch) -> None:
+        plg = sys.modules["plugins"]
+        calls = []
+        monkeypatch.setattr(plg, "getPluginName", lambda ch, slot=-1, *a: "ebbline")
+        monkeypatch.setattr(plg, "getParamName", lambda p, ch, slot=-1: "Shape")
+        monkeypatch.setattr(plg, "getParamValue", lambda p, ch, slot=-1: 0.0)
+        monkeypatch.setattr(plg, "setParamValue", lambda *args: calls.append(args))
+        result = device_module._V2_DISPATCH.dispatch(
+            "plugin_param_set", {"channel": 5, "slot": 0, "param": 5, "value": 0.5}
+        )
+        assert result["ok"] is True, result
+        # value, param, index, slot, pickup mode (0 = apply as sent)
+        assert calls == [(0.5, 5, 5, 0, 0)]
+        # The plugin still reports the old value: flagged, not hidden.
+        assert result["result"]["requested"] == 0.5
+        assert result["result"]["pending"] is True
+
+    def test_list_mixer_track_skips_the_channel_plugin(
+        self, device_module, monkeypatch
+    ) -> None:
+        plg = sys.modules["plugins"]
+        names = {(5, -1): "FLEX", (5, 0): "ebbline"}
+        monkeypatch.setattr(
+            plg, "getPluginName", lambda ch, slot=-1, *a: names.get((ch, slot), "")
+        )
+        as_track = device_module._V2_DISPATCH.dispatch(
+            "plugin_list", {"channel": 5, "mixer": True}
+        )
+        assert as_track["result"] == {
+            "track": 5,
+            "plugins": [{"slot": 0, "name": "ebbline"}],
+        }
+        as_channel = device_module._V2_DISPATCH.dispatch("plugin_list", {"channel": 5})
+        assert as_channel["result"]["plugins"][0] == {"slot": -1, "name": "FLEX"}
